@@ -24,6 +24,9 @@ export interface User {
   trainingProgress?: {
     [key in MisleadingComponent]?: boolean; // true if completed
   };
+  trainingAnswers?: {
+    [key in MisleadingComponent]?: string; // Stored user answers
+  };
 }
 
 export interface Annotation {

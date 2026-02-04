@@ -115,7 +115,8 @@ export const addDetectiveToGame = async (gameId: string, email: string, assigned
         email,
         role: Role.DETECTIVE,
         assignedComponents,
-        trainingProgress: {}
+        trainingProgress: {},
+        trainingAnswers: {}
     };
     // Atomically add to array
     await updateDoc(doc(db, "games", gameId), {
@@ -124,14 +125,21 @@ export const addDetectiveToGame = async (gameId: string, email: string, assigned
     });
 };
 
-export const updateDetectiveTraining = async (gameId: string, email: string, component: MisleadingComponent, currentGame: GameState) => {
+export const updateDetectiveTraining = async (
+    gameId: string, 
+    email: string, 
+    component: MisleadingComponent, 
+    currentGame: GameState,
+    answer: string
+) => {
     // Firestore cannot easily update an object inside an array by query.
     // Read-Modify-Write pattern is safest for this simple app structure.
     const updatedDetectives = currentGame.detectives.map(d => {
         if (d.email === email) {
             return {
                 ...d,
-                trainingProgress: { ...d.trainingProgress, [component]: true }
+                trainingProgress: { ...d.trainingProgress, [component]: true },
+                trainingAnswers: { ...d.trainingAnswers, [component]: answer }
             };
         }
         return d;

@@ -213,7 +213,7 @@ const FacilitatorDashboard = ({ game, email, onEnterRoom, onLogout }: { game: Ga
 const TrainingModule = ({ 
     component, 
     onComplete 
-}: { component: MisleadingComponent, onComplete: () => void }) => {
+}: { component: MisleadingComponent, onComplete: (answer: string) => void }) => {
     const [step, setStep] = useState(1);
     const [userReason, setUserReason] = useState('');
     const [feedback, setFeedback] = useState('');
@@ -225,7 +225,7 @@ const TrainingModule = ({
         setFeedback(result.feedback);
         if (result.correct) {
             setTimeout(() => {
-                onComplete();
+                onComplete(userReason);
             }, 2000);
         }
     };
@@ -334,8 +334,8 @@ const DetectiveDashboard = ({ game, email, onEnterRoom, onLogout }: { game: Game
         {activeTraining && (
             <TrainingModule 
                 component={activeTraining} 
-                onComplete={() => {
-                    updateDetectiveTraining(game.id, email, activeTraining, game);
+                onComplete={(answer) => {
+                    updateDetectiveTraining(game.id, email, activeTraining, game, answer);
                     setActiveTraining(null);
                 }} 
             />
