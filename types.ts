@@ -1,4 +1,4 @@
-export enum Role {
+=export enum Role {
   FACILITATOR = 'FACILITATOR',
   DETECTIVE = 'DETECTIVE',
 }
@@ -15,6 +15,7 @@ export enum GameStatus {
   TRAINING = 'TRAINING',
   ACTIVE = 'ACTIVE',
   FINISHED = 'FINISHED',
+  TERMINATED = 'TERMINATED', // New status for forced end
 }
 
 export interface User {
@@ -39,19 +40,27 @@ export interface Annotation {
   timestamp: number;
 }
 
+// New Interface: Represents a single team/group within the session
+export interface Group {
+    id: string;
+    name: string;
+    detectives: User[];
+    status: GameStatus;
+    annotations: Annotation[];
+    inspectionReport: string;
+    evaluationResult?: {
+        success: boolean;
+        feedback: string;
+        score: number;
+    };
+}
+
+// Refactored GameState: Acts as a container for multiple groups
 export interface GameState {
   id: string;
   facilitatorEmail: string;
-  detectives: User[];
-  detectiveEmails: string[]; // Helper for easier Firestore queries
-  status: GameStatus;
-  annotations: Annotation[];
-  inspectionReport: string;
-  evaluationResult?: {
-    success: boolean;
-    feedback: string;
-    score: number;
-  };
+  detectiveEmails: string[]; // Keep top-level for easy lookup (contains emails from ALL groups)
+  groups: Group[]; // Array of groups
 }
 
 export interface TrainingScenario {

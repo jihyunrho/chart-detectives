@@ -1,4 +1,4 @@
-import { GameState, GameStatus, Role, User, MisleadingComponent, Annotation } from '../types';
+import { GameState, GameStatus, Role, User, MisleadingComponent, Annotation, Group } from '../types';
 
 const STORAGE_KEY = 'chart_detectives_db';
 
@@ -18,15 +18,30 @@ export const createGame = (facilitatorEmail: string): GameState => {
   const newGame: GameState = {
     id: Math.random().toString(36).substring(2, 9),
     facilitatorEmail,
-    detectives: [],
     detectiveEmails: [],
-    status: GameStatus.SETUP,
-    annotations: [],
-    inspectionReport: '',
+    groups: []
   };
   games.push(newGame);
   saveGames(games);
   return newGame;
+};
+
+export const createGroup = (gameId: string, groupName: string): GameState | null => {
+    const games = getGames();
+    const game = games.find(g => g.id === gameId);
+    if (!game) return null;
+
+    const newGroup: Group = {
+        id: Math.random().toString(36).substring(2, 9),
+        name: groupName,
+        detectives: [],
+        status: GameStatus.SETUP,
+        annotations: [],
+        inspectionReport: ''
+    };
+    game.groups.push(newGroup);
+    saveGames(games);
+    return game;
 };
 
 export const getGameByEmail = (email: string): GameState | null => {
@@ -36,7 +51,7 @@ export const getGameByEmail = (email: string): GameState | null => {
   if (game) return game;
   
   // Check if detective
-  game = games.find(g => g.detectives.some(d => d.email === email));
+  game = games.find(g => g.detectiveEmails && g.detectiveEmails.includes(email));
   return game || null;
 };
 
@@ -59,21 +74,20 @@ export const resetGame = (gameId: string): GameState | null => {
     // This allows the facilitator to stay "logged in" but effectively starts a new session.
     games[index] = {
         ...games[index],
-        detectives: [], // Remove all players
         detectiveEmails: [],
-        status: GameStatus.SETUP,
-        annotations: [],
-        inspectionReport: '',
-        evaluationResult: undefined
+        groups: []
     };
     saveGames(games);
     return games[index];
 };
 
-export const addDetective = (gameId: string, email: string, assignedComponents: MisleadingComponent[]): GameState | null => {
+export const addDetective = (gameId: string, groupId: string, email: string, assignedComponents: MisleadingComponent[]): GameState | null => {
   const games = getGames();
   const game = games.find(g => g.id === gameId);
   if (!game) return null;
+
+  const group = game.groups.find(g => g.id === groupId);
+  if (!group) return null;
 
   const newDetective: User = {
     email,
@@ -82,11 +96,11 @@ export const addDetective = (gameId: string, email: string, assignedComponents: 
     trainingProgress: {}
   };
 
-  game.detectives.push(newDetective);
-  if (!game.detectiveEmails) {
-    game.detectiveEmails = [];
+  group.detectives.push(newDetective);
+  if (!game.detectiveEmails) game.detectiveEmails = [];
+  if (!game.detectiveEmails.includes(email)) {
+    game.detectiveEmails.push(email);
   }
-  game.detectiveEmails.push(email);
   
   saveGames(games);
   return game;
@@ -97,20 +111,26 @@ export const updateDetectiveProgress = (gameId: string, email: string, component
   const game = games.find(g => g.id === gameId);
   if (!game) return null;
 
-  const detective = game.detectives.find(d => d.email === email);
-  if (detective) {
-    detective.trainingProgress = { ...detective.trainingProgress, [component]: true };
-    saveGames(games);
+  for (const group of game.groups) {
+      const detective = group.detectives.find(d => d.email === email);
+      if (detective) {
+        detective.trainingProgress = { ...detective.trainingProgress, [component]: true };
+        saveGames(games);
+        break;
+      }
   }
   return game;
 };
 
-export const addAnnotation = (gameId: string, annotation: Annotation): GameState | null => {
+export const addAnnotation = (gameId: string, groupId: string, annotation: Annotation): GameState | null => {
     const games = getGames();
     const game = games.find(g => g.id === gameId);
     if (!game) return null;
 
-    game.annotations.push(annotation);
-    saveGames(games);
+    const group = game.groups.find(g => g.id === groupId);
+    if (group) {
+        group.annotations.push(annotation);
+        saveGames(games);
+    }
     return game;
 }

@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   createGame, findActiveGame, subscribeToGame, 
-  addDetectiveToGame, updateDetectiveTraining, addAnnotationToGame,
-  updateGameStatus, updateGameReport, resetGameData
+  createGroup, addDetectiveToGroup, updateDetectiveTraining, addAnnotationToGroup,
+  updateGroupStatus, updateGroupReport, resetGroupData, resetGameData
 } from './services/gameService';
 import { generateInspectionReport, evaluateInspection, getTrainingFeedback } from './services/geminiService';
-import { Role, MisleadingComponent, GameStatus, GameState, User } from './types';
+import { Role, MisleadingComponent, GameStatus, GameState, User, Group } from './types';
 import { MisleadingChart } from './components/MisleadingCharts';
 import { 
   User as UserIcon, Users, CheckCircle, Lock, Play, 
-  FileText, MessageSquare, AlertTriangle, RefreshCw, LogOut, ArrowLeft, Trash2, Loader2
+  FileText, MessageSquare, AlertTriangle, LogOut, ArrowLeft, Trash2, Loader2, Plus, Ban, RotateCcw
 } from 'lucide-react';
 
 // --- TYPES FOR NAVIGATION ---
@@ -17,10 +17,18 @@ type View = 'LANDING' | 'DASHBOARD' | 'ROOM';
 
 // --- COMPONENTS ---
 
-// 1. Landing / Login
-const Landing = ({ onLogin, loading }: { onLogin: (email: string, isFacilitator: boolean) => void, loading: boolean }) => {
+// 1. Landing / Login (Unchanged logic, just UI check)
+const Landing = ({ 
+    onLogin, 
+    loading, 
+    forcedRole 
+}: { 
+    onLogin: (email: string, isFacilitator: boolean) => void, 
+    loading: boolean,
+    forcedRole?: Role
+}) => {
   const [email, setEmail] = useState('');
-  const [isFacilitator, setIsFacilitator] = useState(true);
+  const [isFacilitator, setIsFacilitator] = useState(forcedRole !== Role.DETECTIVE);
 
   const handleLogin = () => {
     if (!email) return;
@@ -49,18 +57,34 @@ const Landing = ({ onLogin, loading }: { onLogin: (email: string, isFacilitator:
 
           <div className="flex gap-4">
             <button 
-              onClick={() => setIsFacilitator(true)}
-              className={`flex-1 py-2 rounded-lg border flex items-center justify-center gap-2 ${isFacilitator ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-slate-200'}`}
+              onClick={() => !forcedRole && setIsFacilitator(true)}
+              disabled={forcedRole === Role.DETECTIVE}
+              className={`flex-1 py-2 rounded-lg border flex items-center justify-center gap-2 transition-colors
+                ${isFacilitator 
+                    ? 'bg-blue-50 border-blue-500 text-blue-700' 
+                    : forcedRole === Role.DETECTIVE 
+                        ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-50' 
+                        : 'border-slate-200 hover:bg-slate-50'
+                }`}
             >
               <UserIcon size={18} /> Facilitator
             </button>
             <button 
               onClick={() => setIsFacilitator(false)}
-              className={`flex-1 py-2 rounded-lg border flex items-center justify-center gap-2 ${!isFacilitator ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-slate-200'}`}
+              className={`flex-1 py-2 rounded-lg border flex items-center justify-center gap-2 transition-colors
+                ${!isFacilitator 
+                    ? 'bg-blue-50 border-blue-500 text-blue-700' 
+                    : 'border-slate-200 hover:bg-slate-50'}`}
             >
               <Users size={18} /> Detective
             </button>
           </div>
+          
+          {forcedRole === Role.DETECTIVE && (
+              <div className="text-xs text-center text-blue-600 bg-blue-50 p-2 rounded">
+                  Invited as Detective via Link
+              </div>
+          )}
 
           <button 
             onClick={handleLogin}
@@ -75,141 +99,234 @@ const Landing = ({ onLogin, loading }: { onLogin: (email: string, isFacilitator:
   );
 };
 
-// 2. Facilitator Dashboard
-const FacilitatorDashboard = ({ game, email, onEnterRoom, onLogout }: { game: GameState, email: string, onEnterRoom: () => void, onLogout: () => void }) => {
-  const [detectiveEmail, setDetectiveEmail] = useState('');
-  const [selectedComponents, setSelectedComponents] = useState<MisleadingComponent[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  
-  const handleAddDetective = async () => {
-    if(!detectiveEmail) return;
-    if(game.detectives.length >= 3) return alert("Max 3 detectives.");
-    
-    setIsProcessing(true);
-    const assignment = selectedComponents.length > 0 ? selectedComponents : [MisleadingComponent.INVERTED_Y]; // Default
-    await addDetectiveToGame(game.id, detectiveEmail, assignment);
-    setDetectiveEmail('');
-    setSelectedComponents([]);
-    setIsProcessing(false);
+// 2. Group Management Card (For Facilitator)
+const GroupCard = ({ 
+    game, 
+    group, 
+    onEnterRoom 
+}: { 
+    game: GameState, 
+    group: Group, 
+    onEnterRoom: (groupId: string) => void 
+}) => {
+    const [detectiveEmail, setDetectiveEmail] = useState('');
+    const [selectedComponents, setSelectedComponents] = useState<MisleadingComponent[]>([]);
+    const [isProcessing, setIsProcessing] = useState(false);
+
+    const handleAddDetective = async () => {
+        if(!detectiveEmail) return;
+        if(group.detectives.length >= 3) return alert("Max 3 detectives per group.");
+        
+        setIsProcessing(true);
+        const assignment = selectedComponents.length > 0 ? selectedComponents : [MisleadingComponent.INVERTED_Y];
+        await addDetectiveToGroup(game.id, group.id, detectiveEmail, assignment, game);
+        setDetectiveEmail('');
+        setSelectedComponents([]);
+        setIsProcessing(false);
+    };
+
+    const toggleComponent = (c: MisleadingComponent) => {
+        if(selectedComponents.includes(c)) setSelectedComponents(selectedComponents.filter(x => x !== c));
+        else setSelectedComponents([...selectedComponents, c]);
+    };
+
+    const activateGroup = async () => {
+        await updateGroupStatus(game.id, group.id, GameStatus.ACTIVE, game);
+    };
+
+    const terminateGroup = async () => {
+        if(confirm(`Are you sure you want to TERMINATE the game for ${group.name}?`)) {
+            await updateGroupStatus(game.id, group.id, GameStatus.TERMINATED, game);
+        }
+    };
+
+    const resetGroup = async () => {
+        if(confirm(`RESET ${group.name}? Progress will be wiped, but detectives stay.`)) {
+            await resetGroupData(game.id, group.id, game);
+        }
+    };
+
+    return (
+        <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col">
+            <div className="bg-slate-50 p-4 border-b flex justify-between items-center">
+                <div>
+                    <h3 className="font-bold text-lg text-slate-800">{group.name}</h3>
+                    <div className="flex gap-2 mt-1">
+                        <span className={`text-xs px-2 py-0.5 rounded font-bold uppercase
+                            ${group.status === GameStatus.ACTIVE ? 'bg-green-100 text-green-800' : 
+                              group.status === GameStatus.FINISHED ? 'bg-blue-100 text-blue-800' :
+                              group.status === GameStatus.TERMINATED ? 'bg-red-100 text-red-800' : 'bg-slate-200 text-slate-600'}`}>
+                            {group.status}
+                        </span>
+                    </div>
+                </div>
+                <div className="flex gap-1">
+                    <button onClick={resetGroup} title="Reset Group" className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded">
+                        <RotateCcw size={16} />
+                    </button>
+                    <button onClick={terminateGroup} title="Terminate Group" className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded">
+                        <Ban size={16} />
+                    </button>
+                </div>
+            </div>
+
+            <div className="p-4 flex-1">
+                {/* Detectives List */}
+                <div className="space-y-2 mb-4">
+                    {group.detectives.length === 0 && <div className="text-sm text-slate-400 italic">No detectives added.</div>}
+                    {group.detectives.map(d => (
+                        <div key={d.email} className="flex justify-between items-center text-sm bg-slate-50 p-2 rounded border">
+                            <span className="font-medium truncate max-w-[120px]" title={d.email}>{d.email}</span>
+                            <div className="flex gap-1">
+                                {d.assignedComponents?.map(c => (
+                                    <div key={c} className={`w-2 h-2 rounded-full ${d.trainingProgress?.[c] ? 'bg-green-500' : 'bg-slate-300'}`} title={c} />
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Controls */}
+                {group.status === GameStatus.SETUP && (
+                    <div className="border-t pt-4">
+                        <input 
+                            value={detectiveEmail}
+                            onChange={e => setDetectiveEmail(e.target.value)}
+                            placeholder="Detective Email"
+                            className="w-full text-sm border p-2 rounded mb-2"
+                        />
+                        <div className="flex flex-wrap gap-2 mb-2">
+                            {Object.values(MisleadingComponent).map(c => (
+                                <button 
+                                    key={c}
+                                    onClick={() => toggleComponent(c)}
+                                    className={`text-[10px] px-2 py-1 rounded border ${selectedComponents.includes(c) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600'}`}
+                                >
+                                    {c.split(' ')[0]}
+                                </button>
+                            ))}
+                        </div>
+                        <button 
+                            onClick={handleAddDetective} 
+                            disabled={isProcessing}
+                            className="w-full bg-slate-800 text-white text-xs py-2 rounded hover:bg-slate-700 disabled:opacity-50"
+                        >
+                            + Add Detective
+                        </button>
+                        {group.detectives.length > 0 && (
+                            <button 
+                                onClick={activateGroup}
+                                className="w-full mt-2 bg-green-600 text-white text-xs py-2 rounded font-bold hover:bg-green-700 flex items-center justify-center gap-1"
+                            >
+                                <Play size={12}/> Activate
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {group.status === GameStatus.ACTIVE && (
+                    <div className="mt-auto">
+                        <button 
+                            onClick={() => onEnterRoom(group.id)}
+                            className="w-full bg-indigo-600 text-white text-sm py-2 rounded font-bold hover:bg-indigo-700"
+                        >
+                            Enter Room
+                        </button>
+                    </div>
+                )}
+                 {(group.status === GameStatus.FINISHED || group.status === GameStatus.TERMINATED) && (
+                     <div className="mt-auto pt-4 border-t text-center">
+                         {group.evaluationResult && (
+                             <div className="text-2xl font-bold text-indigo-600">{group.evaluationResult.score}/100</div>
+                         )}
+                          <button 
+                            onClick={() => onEnterRoom(group.id)}
+                            className="text-xs text-indigo-600 underline mt-1"
+                        >
+                            View Debrief
+                        </button>
+                     </div>
+                 )}
+            </div>
+        </div>
+    );
+};
+
+// 3. Facilitator Dashboard
+const FacilitatorDashboard = ({ game, email, onEnterRoom, onLogout }: { game: GameState, email: string, onEnterRoom: (groupId: string) => void, onLogout: () => void }) => {
+  const [newGroupName, setNewGroupName] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const handleCreateGroup = async () => {
+      if(!newGroupName) return;
+      await createGroup(game.id, newGroupName);
+      setNewGroupName('');
   };
 
-  const toggleComponent = (c: MisleadingComponent) => {
-    if(selectedComponents.includes(c)) setSelectedComponents(selectedComponents.filter(x => x !== c));
-    else setSelectedComponents([...selectedComponents, c]);
-  };
-
-  const startGame = async () => {
-    await updateGameStatus(game.id, GameStatus.ACTIVE);
-  };
-
-  const handleReset = async () => {
-      if (confirm("Are you sure you want to RESET the game? This will remove all detectives and data.")) {
+  const handleResetAll = async () => {
+      if (confirm("DANGER: This will wipe ALL groups and data. Are you sure?")) {
           await resetGameData(game.id, email);
       }
   };
 
+  const copyInviteLink = () => {
+      const url = `${window.location.origin}/detectives`;
+      navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-2xl font-bold text-slate-800">Mission Control</h1>
+    <div className="p-6 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+        <div>
+            <h1 className="text-2xl font-bold text-slate-800">Mission Control</h1>
+            <button 
+                onClick={copyInviteLink} 
+                className="text-sm flex items-center gap-1 text-blue-600 hover:text-blue-800 mt-1"
+            >
+                 {copied ? <CheckCircle size={14} /> : <Users size={14} />} 
+                 {copied ? "Copied Invite Link!" : "Copy General Invite Link"}
+            </button>
+        </div>
         <div className="flex gap-2">
-            <span className={`px-3 py-1 rounded-full text-sm font-bold ${game.status === GameStatus.ACTIVE ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                Status: {game.status}
-            </span>
-            <button title="Reset Game" onClick={handleReset} className="p-2 bg-red-100 rounded-full hover:bg-red-200 text-red-700 border border-red-200"><Trash2 size={16}/></button>
+            <button title="Reset Entire Session" onClick={handleResetAll} className="p-2 bg-red-100 rounded-full hover:bg-red-200 text-red-700 border border-red-200"><Trash2 size={16}/></button>
             <button title="Logout" onClick={onLogout} className="p-2 bg-slate-200 rounded-full hover:bg-red-100 text-red-600"><LogOut size={16}/></button>
         </div>
       </div>
 
-      {game.status === GameStatus.SETUP && (
-        <div className="bg-white p-6 rounded-xl shadow-md mb-6">
-          <h2 className="text-lg font-semibold mb-4">Recruit Detectives</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium mb-2">Detective Email</label>
+      {/* New Group Input */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border mb-8 max-w-xl">
+          <label className="block text-sm font-bold text-slate-700 mb-2">Create New Team</label>
+          <div className="flex gap-2">
               <input 
-                value={detectiveEmail} 
-                onChange={(e) => setDetectiveEmail(e.target.value)}
-                className="w-full border p-2 rounded" 
+                  value={newGroupName}
+                  onChange={e => setNewGroupName(e.target.value)}
+                  placeholder="e.g. Alpha Team"
+                  className="flex-1 border p-2 rounded"
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Assign Training Modules</label>
-              <div className="space-y-2">
-                {Object.values(MisleadingComponent).map(c => (
-                  <label key={c} className="flex items-center gap-2 cursor-pointer">
-                    <input 
-                        type="checkbox" 
-                        checked={selectedComponents.includes(c)}
-                        onChange={() => toggleComponent(c)}
-                        className="rounded text-blue-600"
-                    />
-                    <span className="text-sm">{c}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-          <button onClick={handleAddDetective} disabled={isProcessing} className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50">
-            {isProcessing ? 'Adding...' : '+ Add Detective'}
-          </button>
-        </div>
-      )}
-
-      <div className="grid gap-4 mb-8">
-        {game.detectives.length === 0 && <div className="text-slate-400 italic">No detectives recruited yet.</div>}
-        {game.detectives.map((d, i) => (
-          <div key={i} className="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500 flex justify-between items-center">
-            <div>
-              <h3 className="font-bold">{d.email}</h3>
-              <p className="text-xs text-slate-500">Assigned: {d.assignedComponents?.join(', ')}</p>
-            </div>
-            <div className="text-right">
-               <div className="text-sm font-semibold text-slate-600">Training Progress</div>
-               <div className="flex gap-1 mt-1">
-                 {d.assignedComponents?.map(ac => (
-                    <div key={ac} className={`w-3 h-3 rounded-full ${d.trainingProgress?.[ac] ? 'bg-green-500' : 'bg-slate-300'}`} title={ac}></div>
-                 ))}
-               </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {game.status === GameStatus.SETUP && game.detectives.length > 0 && (
-         <button onClick={startGame} className="w-full py-4 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 flex justify-center items-center gap-2">
-            <Play /> Activate Game Mode
-         </button>
-      )}
-
-      {game.status === GameStatus.ACTIVE && (
-          <div className="text-center p-8 bg-slate-100 rounded-xl border border-dashed border-slate-300">
-              <p className="text-slate-600 mb-4">Game is active. Join the Game Room to facilitate.</p>
-              <button 
-                onClick={onEnterRoom}
-                className="inline-block bg-indigo-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-indigo-700"
-              >
-                  Enter Game Room
+              <button onClick={handleCreateGroup} className="bg-slate-900 text-white px-4 py-2 rounded font-bold flex items-center gap-2">
+                  <Plus size={16}/> Create
               </button>
           </div>
-      )}
-       {game.status === GameStatus.FINISHED && (
-          <div className="text-center p-8 bg-slate-100 rounded-xl">
-             <h2 className="text-2xl font-bold mb-4">Mission Debrief</h2>
-             {game.evaluationResult && (
-                 <div className="bg-white p-6 rounded shadow max-w-lg mx-auto">
-                     <div className="text-4xl font-bold mb-2 text-indigo-600">{game.evaluationResult.score}/100</div>
-                     <p className="text-lg font-semibold">{game.evaluationResult.success ? "Mission Success" : "Mission Failed"}</p>
-                     <p className="text-slate-600 mt-2">{game.evaluationResult.feedback}</p>
-                 </div>
-             )}
-          </div>
-      )}
+      </div>
+
+      {/* Groups Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {game.groups.map(group => (
+              <GroupCard key={group.id} game={game} group={group} onEnterRoom={onEnterRoom} />
+          ))}
+          {game.groups.length === 0 && (
+              <div className="col-span-full text-center py-20 text-slate-400 border-2 border-dashed rounded-xl">
+                  Create a group to get started.
+              </div>
+          )}
+      </div>
     </div>
   );
 };
 
-// 3. Training Module
+// 4. Training Module (Unchanged)
 const TrainingModule = ({ 
     component, 
     onComplete 
@@ -320,14 +437,36 @@ const TrainingModule = ({
     );
 };
 
-// 4. Detective Dashboard
-const DetectiveDashboard = ({ game, email, onEnterRoom, onLogout }: { game: GameState, email: string, onEnterRoom: () => void, onLogout: () => void }) => {
+// 5. Detective Dashboard (Updated for Groups)
+const DetectiveDashboard = ({ game, email, onEnterRoom, onLogout }: { game: GameState, email: string, onEnterRoom: (groupId: string) => void, onLogout: () => void }) => {
   const [activeTraining, setActiveTraining] = useState<MisleadingComponent | null>(null);
-  const me = game.detectives.find(d => d.email === email);
   
-  if (!me) return <div>Access Denied or Loading...</div>;
+  // Find which group this detective belongs to
+  const myGroup = game.groups.find(g => g.detectives.some(d => d.email === email));
+  
+  if (!myGroup) return (
+      <div className="p-8 text-center">
+          <h2 className="text-xl font-bold text-slate-700">Waiting for assignment...</h2>
+          <p className="text-slate-500">The Facilitator has not added you to a group yet.</p>
+          <button onClick={onLogout} className="mt-4 text-red-500 underline">Logout</button>
+      </div>
+  );
 
+  const me = myGroup.detectives.find(d => d.email === email)!;
   const isTrainingComplete = me.assignedComponents?.every(c => me.trainingProgress?.[c]);
+
+  if (myGroup.status === GameStatus.TERMINATED) {
+       return (
+          <div className="min-h-screen flex items-center justify-center bg-red-50">
+              <div className="text-center p-8 bg-white rounded-xl shadow-lg border border-red-200">
+                  <Ban className="mx-auto text-red-500 h-12 w-12 mb-4" />
+                  <h1 className="text-2xl font-bold text-red-800">Mission Terminated</h1>
+                  <p className="text-slate-600 mt-2">The facilitator has ended this session.</p>
+                  <button onClick={onLogout} className="mt-6 px-4 py-2 bg-slate-200 rounded hover:bg-slate-300">Logout</button>
+              </div>
+          </div>
+      );
+  }
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -335,7 +474,7 @@ const DetectiveDashboard = ({ game, email, onEnterRoom, onLogout }: { game: Game
             <TrainingModule 
                 component={activeTraining} 
                 onComplete={(answer) => {
-                    updateDetectiveTraining(game.id, email, activeTraining, game, answer);
+                    updateDetectiveTraining(game.id, myGroup.id, email, activeTraining, game, answer);
                     setActiveTraining(null);
                 }} 
             />
@@ -344,7 +483,7 @@ const DetectiveDashboard = ({ game, email, onEnterRoom, onLogout }: { game: Game
         <div className="mb-8 flex justify-between items-center">
             <div>
                 <h1 className="text-2xl font-bold text-slate-800">Detective Workspace</h1>
-                <p className="text-slate-500">Welcome, Agent {email.split('@')[0]}.</p>
+                <p className="text-slate-500">Agent: {email} | Team: <span className="font-bold text-indigo-600">{myGroup.name}</span></p>
             </div>
             <button title="Logout" onClick={onLogout} className="p-2 bg-slate-200 rounded-full hover:bg-red-100 text-red-600"><LogOut size={16}/></button>
         </div>
@@ -355,6 +494,7 @@ const DetectiveDashboard = ({ game, email, onEnterRoom, onLogout }: { game: Game
                     <CheckCircle className="text-blue-500" /> Training Status
                 </h2>
                 <div className="space-y-3">
+                    {me.assignedComponents?.length === 0 && <p className="text-sm text-slate-400">No training modules assigned yet.</p>}
                     {me.assignedComponents?.map(comp => (
                         <div key={comp} className="flex justify-between items-center p-3 bg-slate-50 rounded">
                             <span className="text-sm font-medium">{comp}</span>
@@ -377,16 +517,28 @@ const DetectiveDashboard = ({ game, email, onEnterRoom, onLogout }: { game: Game
                 <h2 className="font-bold text-lg mb-4 flex items-center gap-2">
                      Mission Status
                 </h2>
-                {game.status === GameStatus.ACTIVE ? (
+                {myGroup.status === GameStatus.ACTIVE ? (
                     <div className="w-full">
                          <div className="mb-4 text-green-600 font-bold bg-green-50 p-2 rounded">
                             MISSION ACTIVE
                          </div>
                          <button 
-                            onClick={onEnterRoom}
+                            onClick={() => onEnterRoom(myGroup.id)}
                             className="block w-full py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 shadow-lg transform transition hover:scale-105"
                          >
                             ENTER GAME ROOM
+                         </button>
+                    </div>
+                ) : myGroup.status === GameStatus.FINISHED ? (
+                    <div className="w-full">
+                         <div className="mb-4 text-blue-600 font-bold bg-blue-50 p-2 rounded">
+                            MISSION FINISHED
+                         </div>
+                         <button 
+                            onClick={() => onEnterRoom(myGroup.id)}
+                            className="block w-full py-3 bg-slate-600 text-white rounded-lg font-bold hover:bg-slate-700 shadow-lg"
+                         >
+                            VIEW DEBRIEF
                          </button>
                     </div>
                 ) : (
@@ -402,17 +554,36 @@ const DetectiveDashboard = ({ game, email, onEnterRoom, onLogout }: { game: Game
   );
 };
 
-// 5. Game Room (Shared)
-const GameRoom = ({ game, email, onLeave }: { game: GameState, email: string, onLeave: () => void }) => {
+// 6. Game Room (Shared) - Scoped to Group
+const GameRoom = ({ 
+    game, 
+    groupId, 
+    email, 
+    onLeave 
+}: { 
+    game: GameState, 
+    groupId: string, 
+    email: string, 
+    onLeave: () => void 
+}) => {
     const isFacilitator = game.facilitatorEmail === email;
+    const group = game.groups.find(g => g.id === groupId);
+
     const [selectedSpot, setSelectedSpot] = useState<{x: number, y: number} | null>(null);
     const [reason, setReason] = useState('');
     const [impact, setImpact] = useState('');
-    const [reportDraft, setReportDraft] = useState(game.inspectionReport);
+    const [reportDraft, setReportDraft] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
 
+    // Sync draft with db when group loads
+    useEffect(() => {
+        if (group) setReportDraft(group.inspectionReport || '');
+    }, [group?.inspectionReport]);
+
+    if (!group) return <div>Group not found</div>;
+
     const handleGraphClick = (e: React.MouseEvent<HTMLDivElement>) => {
-        if(isFacilitator || game.status === GameStatus.FINISHED) return;
+        if(isFacilitator || group.status === GameStatus.FINISHED || group.status === GameStatus.TERMINATED) return;
         const rect = e.currentTarget.getBoundingClientRect();
         const x = ((e.clientX - rect.left) / rect.width) * 100;
         const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -421,7 +592,7 @@ const GameRoom = ({ game, email, onLeave }: { game: GameState, email: string, on
 
     const submitAnnotation = async () => {
         if(!selectedSpot || !reason) return;
-        await addAnnotationToGame(game.id, {
+        await addAnnotationToGroup(game.id, group.id, {
             id: Date.now().toString(),
             x: selectedSpot.x,
             y: selectedSpot.y,
@@ -429,7 +600,7 @@ const GameRoom = ({ game, email, onLeave }: { game: GameState, email: string, on
             reason,
             impact,
             timestamp: Date.now()
-        });
+        }, game);
         setSelectedSpot(null);
         setReason('');
         setImpact('');
@@ -437,33 +608,33 @@ const GameRoom = ({ game, email, onLeave }: { game: GameState, email: string, on
 
     const handleGenerateReport = async () => {
         setIsGenerating(true);
-        const text = await generateInspectionReport(game.annotations);
-        await updateGameReport(game.id, text);
+        const text = await generateInspectionReport(group.annotations);
+        await updateGroupReport(game.id, group.id, text, game);
         setIsGenerating(false);
     };
 
     const handleSubmitReport = async () => {
         setIsGenerating(true);
-        const allComponents = Array.from(new Set(game.detectives.flatMap(d => d.assignedComponents || [])));
-        const result = await evaluateInspection(reportDraft || game.inspectionReport, allComponents);
-        await updateGameReport(game.id, reportDraft || game.inspectionReport, result);
+        const allComponents = Array.from(new Set(group.detectives.flatMap(d => d.assignedComponents || [])));
+        const result = await evaluateInspection(reportDraft || group.inspectionReport, allComponents);
+        await updateGroupReport(game.id, group.id, reportDraft || group.inspectionReport, game, result);
         setIsGenerating(false);
     };
 
-    if (game.status === GameStatus.FINISHED && game.evaluationResult) {
+    if (group.status === GameStatus.FINISHED && group.evaluationResult) {
         return (
             <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 text-white">
                 <div className="bg-slate-800 p-8 rounded-xl max-w-2xl text-center">
                     <div className="text-6xl mb-4">🕵️‍♂️</div>
-                    <h1 className="text-3xl font-bold mb-2">Mission Debrief</h1>
-                    <div className={`text-5xl font-black mb-6 ${game.evaluationResult.success ? 'text-green-400' : 'text-red-400'}`}>
-                        {game.evaluationResult.score}/100
+                    <h1 className="text-3xl font-bold mb-2">Mission Debrief: {group.name}</h1>
+                    <div className={`text-5xl font-black mb-6 ${group.evaluationResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                        {group.evaluationResult.score}/100
                     </div>
                     <div className="bg-slate-700 p-6 rounded-lg text-left mb-6">
                         <h3 className="font-bold text-slate-300 uppercase text-xs mb-2">HQ Feedback</h3>
-                        <p className="text-lg">{game.evaluationResult.feedback}</p>
+                        <p className="text-lg">{group.evaluationResult.feedback}</p>
                     </div>
-                    <button onClick={onLeave} className="px-6 py-2 bg-slate-600 hover:bg-slate-500 rounded">Return to HQ</button>
+                    <button onClick={onLeave} className="px-6 py-2 bg-slate-600 hover:bg-slate-500 rounded">Return to Dashboard</button>
                 </div>
             </div>
         )
@@ -478,7 +649,7 @@ const GameRoom = ({ game, email, onLeave }: { game: GameState, email: string, on
                         <ArrowLeft size={20} />
                      </button>
                     <h1 className="font-bold text-slate-800 flex items-center gap-2">
-                        <AlertTriangle className="text-red-500" /> Case File #8821: "Marketing Growth"
+                        <AlertTriangle className="text-red-500" /> Case File #8821: "Marketing Growth" <span className="bg-slate-200 text-slate-600 px-2 py-0.5 text-xs rounded-full">{group.name}</span>
                     </h1>
                 </div>
                 <div className="flex items-center gap-4 text-sm">
@@ -500,7 +671,7 @@ const GameRoom = ({ game, email, onLeave }: { game: GameState, email: string, on
                             <MisleadingChart type="FINAL_BOSS" />
                             
                             {/* Annotations Overlay */}
-                            {game.annotations.map(a => (
+                            {group.annotations.map(a => (
                                 <div 
                                     key={a.id}
                                     className="absolute w-6 h-6 -ml-3 -mt-3 bg-red-500/20 border-2 border-red-500 rounded-full flex items-center justify-center text-xs font-bold text-red-700 shadow-sm cursor-pointer hover:scale-125 transition-transform group"
@@ -553,16 +724,16 @@ const GameRoom = ({ game, email, onLeave }: { game: GameState, email: string, on
                 <div className="w-96 bg-white border-l flex flex-col shadow-xl z-10">
                     <div className="p-4 border-b bg-slate-50">
                         <h2 className="font-bold flex items-center gap-2">
-                            <MessageSquare size={18}/> Detective Notes
+                            <MessageSquare size={18}/> Team Notes
                         </h2>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                        {game.annotations.length === 0 && (
+                        {group.annotations.length === 0 && (
                             <div className="text-center text-slate-400 text-sm mt-10">
                                 Click on the graph to identify misleading elements.
                             </div>
                         )}
-                        {game.annotations.map(a => (
+                        {group.annotations.map(a => (
                             <div key={a.id} className="bg-slate-50 p-3 rounded border border-slate-200 text-sm">
                                 <div className="flex justify-between items-start mb-1">
                                     <span className="font-bold text-slate-700 text-xs">{a.authorEmail}</span>
@@ -579,29 +750,28 @@ const GameRoom = ({ game, email, onLeave }: { game: GameState, email: string, on
                          <h2 className="font-bold text-sm mb-2 flex items-center gap-2">
                              <FileText size={16}/> Inspection Report
                          </h2>
-                         {isFacilitator && !game.inspectionReport && (
+                         {isFacilitator && !group.inspectionReport && (
                              <button 
                                 onClick={handleGenerateReport}
-                                disabled={game.annotations.length === 0 || isGenerating}
+                                disabled={group.annotations.length === 0 || isGenerating}
                                 className="w-full bg-indigo-600 text-white py-2 rounded text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
                              >
                                  {isGenerating ? 'Generating...' : 'Generate AI Report'}
                              </button>
                          )}
 
-                         {(game.inspectionReport || reportDraft) && (
+                         {(group.inspectionReport || reportDraft) && (
                              <div className="space-y-2">
                                  <textarea 
                                     className="w-full h-32 p-2 text-xs border rounded bg-white"
-                                    value={reportDraft || game.inspectionReport}
+                                    value={reportDraft || group.inspectionReport}
                                     onChange={e => {
                                         setReportDraft(e.target.value);
-                                        // Update Firestore with draft typing (debounce could be added, but sending raw is fine for prototype)
-                                        updateGameReport(game.id, e.target.value); 
+                                        updateGroupReport(game.id, group.id, e.target.value, game); 
                                     }}
-                                    readOnly={game.status === GameStatus.FINISHED}
+                                    readOnly={group.status === GameStatus.FINISHED}
                                  />
-                                 {isFacilitator && game.status !== GameStatus.FINISHED && (
+                                 {isFacilitator && group.status !== GameStatus.FINISHED && group.status !== GameStatus.TERMINATED && (
                                      <button 
                                         onClick={handleSubmitReport}
                                         disabled={isGenerating}
@@ -627,10 +797,17 @@ const App = () => {
   const [gameId, setGameId] = useState<string | null>(null);
   const [game, setGame] = useState<GameState | null>(null);
   const [loading, setLoading] = useState(false);
+  const [forcedRole, setForcedRole] = useState<Role | undefined>(undefined);
+  // NEW: Track which room is active (for both facilitator inspecting and detective playing)
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
-  // 1. Initial Load: Check local storage for session
   useEffect(() => {
     const restoreSession = async () => {
+        const path = window.location.pathname;
+        if (path.includes('/detectives')) {
+            setForcedRole(Role.DETECTIVE);
+        }
+
         const savedEmail = localStorage.getItem('chart_detectives_email');
         if (savedEmail) {
             setLoading(true);
@@ -648,22 +825,17 @@ const App = () => {
     restoreSession();
   }, []);
 
-  // 2. Real-time Subscription: Connect to Firestore when gameId is set
   useEffect(() => {
     if (!gameId) return;
-
-    // Use the Real-time listener service
     const unsubscribe = subscribeToGame(gameId, (updatedGame) => {
         if (updatedGame) {
             setGame(updatedGame);
         } else {
-            // Game deleted or error
             setGame(null);
             setView('LANDING');
             setGameId(null);
         }
     });
-
     return () => unsubscribe();
   }, [gameId]);
 
@@ -693,22 +865,28 @@ const App = () => {
     setEmail('');
     setGame(null);
     setGameId(null);
+    setActiveGroupId(null);
     setView('LANDING');
   };
 
+  const handleEnterRoom = (groupId: string) => {
+      setActiveGroupId(groupId);
+      setView('ROOM');
+  };
+
   if (view === 'LANDING' || !game) {
-    return <Landing onLogin={handleLogin} loading={loading} />;
+    return <Landing onLogin={handleLogin} loading={loading} forcedRole={forcedRole} />;
   }
 
   const isFacilitator = game.facilitatorEmail === email;
 
-  if (view === 'ROOM') {
-    return <GameRoom game={game} email={email} onLeave={() => setView('DASHBOARD')} />;
+  if (view === 'ROOM' && activeGroupId) {
+    return <GameRoom game={game} groupId={activeGroupId} email={email} onLeave={() => setView('DASHBOARD')} />;
   }
 
   return isFacilitator 
-    ? <FacilitatorDashboard game={game} email={email} onEnterRoom={() => setView('ROOM')} onLogout={handleLogout} />
-    : <DetectiveDashboard game={game} email={email} onEnterRoom={() => setView('ROOM')} onLogout={handleLogout} />;
+    ? <FacilitatorDashboard game={game} email={email} onEnterRoom={handleEnterRoom} onLogout={handleLogout} />
+    : <DetectiveDashboard game={game} email={email} onEnterRoom={handleEnterRoom} onLogout={handleLogout} />;
 };
 
 export default App;
