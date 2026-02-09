@@ -3,42 +3,66 @@ import {
   getFirestore, collection, doc, setDoc, getDocs, 
   query, where, updateDoc, arrayUnion, onSnapshot 
 } from 'firebase/firestore';
-import { GameState, GameStatus, Role, MisleadingComponent, Annotation, User, Group } from '../types';
+import { GameState, GameStatus, Role, MisleadingComponent, Annotation, User, Group, RoundHistory } from '../types';
 
-// !!! IMPORTANT: PASTE YOUR FIREBASE CONFIG HERE !!!
+// Use environment variables for Firebase configuration
+// Ensure you have a .env file with these keys starting with VITE_
 const firebaseConfig = {
-  // Example:
-  // apiKey: "AIzaSy...",
-  // authDomain: "your-project.firebaseapp.com",
-  // projectId: "your-project",
-  // ...
+  apiKey: process.env.VITE_FIREBASE_API_KEY,
+  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
-let db: any;
-try {
-    if (Object.keys(firebaseConfig).length > 0) {
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-        console.log("Firebase initialized successfully");
-    } else {
-        console.error("Firebase config is empty! Please add your keys in services/gameService.ts");
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// --- HELPER: Random Issue Generator ---
+const generateCaseIssues = (detectives: User[]): MisleadingComponent[] => {
+    // 1. Get all components assigned to detectives (The Training Set)
+    const assignedSet = new Set<MisleadingComponent>();
+    detectives.forEach(d => {
+        d.assignedComponents?.forEach(c => assignedSet.add(c));
+    });
+
+    // 2. Get the pool of components NOT assigned
+    const allComponents = Object.values(MisleadingComponent);
+    const unassigned = allComponents.filter(c => !assignedSet.has(c));
+
+    // 3. Pick 2 random components from the unassigned pool
+    const randomPicks: MisleadingComponent[] = [];
+    const pool = [...unassigned];
+    
+    // Pick first random
+    if (pool.length > 0) {
+        const idx1 = Math.floor(Math.random() * pool.length);
+        randomPicks.push(pool[idx1]);
+        pool.splice(idx1, 1);
     }
-} catch (e) {
-    console.error("Error initializing Firebase:", e);
-}
+    // Pick second random
+    if (pool.length > 0) {
+        const idx2 = Math.floor(Math.random() * pool.length);
+        randomPicks.push(pool[idx2]);
+    }
+
+    // 4. Combine Assigned + Randoms
+    const finalIssues = Array.from(new Set([...Array.from(assignedSet), ...randomPicks]));
+    return finalIssues;
+};
+
 
 // 1. Create a new game session (Container)
 export const createGame = async (facilitatorEmail: string): Promise<string> => {
-    if (!db) throw new Error("Firebase not connected. Check config.");
-    
     const newGameId = Math.random().toString(36).substring(2, 9);
     
     const newGame: GameState = {
         id: newGameId,
         facilitatorEmail,
         detectiveEmails: [],
-        groups: [] // Start with no groups
+        groups: [] 
     };
 
     await setDoc(doc(db, "games", newGameId), newGame);
@@ -47,16 +71,14 @@ export const createGame = async (facilitatorEmail: string): Promise<string> => {
 
 // 2. Find an existing active game for a user
 export const findActiveGame = async (email: string): Promise<string | null> => {
-    if (!db) return null;
     const gamesRef = collection(db, "games");
-    
     try {
         // A. Is Facilitator?
         const q1 = query(gamesRef, where("facilitatorEmail", "==", email));
         const snap1 = await getDocs(q1);
         if (!snap1.empty) return snap1.docs[0].id;
 
-        // B. Is Detective? (Checks the global list of emails in the game doc)
+        // B. Is Detective?
         const q2 = query(gamesRef, where("detectiveEmails", "array-contains", email));
         const snap2 = await getDocs(q2);
         if (!snap2.empty) return snap2.docs[0].id;
@@ -68,11 +90,23 @@ export const findActiveGame = async (email: string): Promise<string | null> => {
 
 // 3. Real-time Subscription
 export const subscribeToGame = (gameId: string, callback: (game: GameState | null) => void) => {
-    if (!db) return () => {};
-    console.log("Subscribing to game:", gameId);
     return onSnapshot(doc(db, "games", gameId), (docSnap) => {
         if (docSnap.exists()) {
-            callback(docSnap.data() as GameState);
+            const data = docSnap.data();
+            // NORMALIZE DATA: Ensure Arrays exist even if Firestore data is old/sparse
+            const safeGame: GameState = {
+                id: data.id,
+                facilitatorEmail: data.facilitatorEmail,
+                detectiveEmails: data.detectiveEmails || [],
+                groups: (data.groups || []).map((g: any) => ({
+                    ...g,
+                    // Ensure new fields exist for backward compatibility
+                    currentCaseIndex: g.currentCaseIndex || 0,
+                    roundHistory: g.roundHistory || [],
+                    currentCaseTargetIssues: g.currentCaseTargetIssues || [] 
+                }))
+            };
+            callback(safeGame);
         } else {
             callback(null);
         }
@@ -83,13 +117,16 @@ export const subscribeToGame = (gameId: string, callback: (game: GameState | nul
 
 export const createGroup = async (gameId: string, groupName: string) => {
     const newGroup: Group = {
-        id: Date.now().toString(), // Simple ID
+        id: Date.now().toString(),
         name: groupName,
         detectives: [],
         status: GameStatus.SETUP,
         annotations: [],
-        inspectionReport: ''
+        inspectionReport: '',
+        currentCaseIndex: 0,
+        roundHistory: []
     };
+
     await updateDoc(doc(db, "games", gameId), {
         groups: arrayUnion(newGroup)
     });
@@ -110,7 +147,7 @@ export const addDetectiveToGroup = async (
         trainingAnswers: {}
     };
 
-    // Update specific group
+    // Update the specific group in the local array, then push the whole array
     const updatedGroups = currentGame.groups.map(g => {
         if (g.id === groupId) {
             return { ...g, detectives: [...g.detectives, newDetective] };
@@ -118,22 +155,31 @@ export const addDetectiveToGroup = async (
         return g;
     });
 
-    // Also add to global detectiveEmails for lookup
-    // Note: This logic assumes one detective is in only one group per game id.
-    const updatedEmails = [...currentGame.detectiveEmails, email];
+    // Also update the top-level detective list for easier searching
+    const updatedEmails = [...(currentGame.detectiveEmails || []), email];
+    // Remove duplicates just in case
+    const uniqueEmails = Array.from(new Set(updatedEmails));
 
     await updateDoc(doc(db, "games", gameId), {
         groups: updatedGroups,
-        detectiveEmails: updatedEmails
+        detectiveEmails: uniqueEmails
     });
 };
 
 // --- GROUP ACTIONS ---
 
 export const updateGroupStatus = async (gameId: string, groupId: string, status: GameStatus, currentGame: GameState) => {
-    const updatedGroups = currentGame.groups.map(g => 
-        g.id === groupId ? { ...g, status } : g
-    );
+    const updatedGroups = currentGame.groups.map(g => {
+        if (g.id === groupId) {
+             const updates: Partial<Group> = { status };
+             // If activating (Moving to Case 1), generate the issues for the first case
+             if (status === GameStatus.ACTIVE && g.status === GameStatus.SETUP) {
+                 updates.currentCaseTargetIssues = generateCaseIssues(g.detectives);
+             }
+             return { ...g, ...updates };
+        }
+        return g;
+    });
     await updateDoc(doc(db, "games", gameId), { groups: updatedGroups });
 };
 
@@ -161,7 +207,6 @@ export const updateDetectiveTraining = async (
         }
         return g;
     });
-    
     await updateDoc(doc(db, "games", gameId), { groups: updatedGroups });
 };
 
@@ -193,17 +238,20 @@ export const updateGroupReport = async (
     await updateDoc(doc(db, "games", gameId), { groups: updatedGroups });
 };
 
-// Reset a specific group (keep users, wipe progress)
 export const resetGroupData = async (gameId: string, groupId: string, currentGame: GameState) => {
     const updatedGroups = currentGame.groups.map(g => {
         if (g.id === groupId) {
+            // Destructure to remove evaluationResult from the base object
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { evaluationResult, currentCaseTargetIssues, ...rest } = g;
+            
             return {
-                ...g,
+                ...rest,
                 status: GameStatus.SETUP,
                 annotations: [],
                 inspectionReport: '',
-                evaluationResult: undefined,
-                // Reset detective progress but keep them in the group
+                currentCaseIndex: 0,
+                roundHistory: [],
                 detectives: g.detectives.map(d => ({
                     ...d,
                     trainingProgress: {},
@@ -216,7 +264,6 @@ export const resetGroupData = async (gameId: string, groupId: string, currentGam
     await updateDoc(doc(db, "games", gameId), { groups: updatedGroups });
 };
 
-// Reset entire game (wipe everything)
 export const resetGameData = async (gameId: string, facilitatorEmail: string) => {
     const emptyGame: GameState = {
         id: gameId,
@@ -225,4 +272,49 @@ export const resetGameData = async (gameId: string, facilitatorEmail: string) =>
         groups: [] 
     };
     await setDoc(doc(db, "games", gameId), emptyGame);
+};
+
+// NEW: Advance to the next round
+export const advanceToNextRound = async (
+    gameId: string, 
+    groupId: string, 
+    caseTitle: string,
+    currentGame: GameState
+) => {
+    const updatedGroups = currentGame.groups.map(g => {
+        if (g.id === groupId) {
+            // Archive current round
+            // Safe guard against undefined evaluationResult to prevent Firestore error in historyEntry
+            const evalResult = g.evaluationResult || { success: false, feedback: "Evaluation Missing", score: 0 };
+            
+            const historyEntry: RoundHistory = {
+                caseIndex: g.currentCaseIndex,
+                caseTitle: caseTitle,
+                annotations: [...g.annotations],
+                inspectionReport: g.inspectionReport || "",
+                targetIssues: g.currentCaseTargetIssues || [], // Save what was active!
+                evaluationResult: evalResult
+            };
+
+            // Destructure to remove evaluationResult from the new state to clean up for next round
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { evaluationResult, ...rest } = g;
+            
+            // Generate NEW mixed issues for the next round to keep it challenging
+            const nextIssues = generateCaseIssues(g.detectives);
+
+            return {
+                ...rest,
+                status: GameStatus.ACTIVE, // Resume action
+                currentCaseIndex: g.currentCaseIndex + 1,
+                currentCaseTargetIssues: nextIssues,
+                roundHistory: [...(g.roundHistory || []), historyEntry],
+                // Reset session data for new round
+                annotations: [],
+                inspectionReport: '',
+            };
+        }
+        return g;
+    });
+    await updateDoc(doc(db, "games", gameId), { groups: updatedGroups });
 };
