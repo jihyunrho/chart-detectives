@@ -10,7 +10,7 @@ import { MisleadingChart } from './components/MisleadingCharts';
 import { 
   User as UserIcon, Users, CheckCircle, Lock, Play, 
   FileText, MessageSquare, AlertTriangle, LogOut, ArrowLeft, Trash2, Loader2, Plus, Ban, RotateCcw,
-  ArrowRight, Quote, Maximize2, X, History
+  ArrowRight, Quote, Maximize2, X, History, Check, Eye
 } from 'lucide-react';
 
 // --- TYPES FOR NAVIGATION ---
@@ -22,14 +22,16 @@ const CASES: CaseScenario[] = [
         id: 'CASE_POLICY',
         title: "The Safe City Initiative",
         description: "The Mayor's office is pushing for a budget increase based on this safety data.",
-        persuasiveReport: "As clearly shown in the graph, our 'Smart Surveillance' pilot program has caused a massive, unprecedented spike in the Public Safety Index since 2023. Therefore, to maintain this safety revolution, we must approve the full budget for Phase 2 immediately.",
+        // UPDATED: Text explicitly references the visual exaggeration caused by the truncated axis.
+        persuasiveReport: "The graph clearly demonstrates a dramatic surge in the Public Safety Index, climbing significantly year over year. This steep upward trend proves the immediate success of our 'Smart Surveillance' pilot. Therefore, we must secure the full budget for Phase 2 to prevent any reversal of these safety gains.",
         chartType: 'CASE_POLICY',
     },
     {
         id: 'CASE_MARKETING',
         title: "Project Viral Boom",
         description: "The Marketing Agency is demanding a contract renewal based on campaign performance.",
-        persuasiveReport: "While traditional revenue metrics are lagging indicators, the orange line shows our 'Brand Buzz' is skyrocketing exponentially! This proves our strategy is working. Therefore, we must double the ad spend next month to convert this buzz into sales.",
+        // UPDATED: Text explicitly references "Skyrocketing Buzz" (due to bad order) and dismisses Revenue (inverted/crashed) as "lagging".
+        persuasiveReport: "Although revenue shows some visual volatility, the orange line reveals the true story: our 'Brand Buzz' is skyrocketing exponentially! This leading indicator proves our viral strategy is working. We must double our ad spend immediately to capture this momentum before it fades.",
         chartType: 'CASE_MARKETING',
     }
 ];
@@ -142,8 +144,16 @@ const GroupCard: React.FC<GroupCardProps> = ({
 
     const handleAddDetective = async () => {
         if(!detectiveEmail) return;
+        
+        // --- CHECK 1: Max Limit ---
         if((group.detectives || []).length >= 3) return alert("Max 3 detectives per group.");
         
+        // --- CHECK 2: Duplicate Email in Entire Game ---
+        if (game.detectiveEmails && game.detectiveEmails.includes(detectiveEmail)) {
+            alert(`Error: Detective "${detectiveEmail}" is already registered in a group.`);
+            return;
+        }
+
         setIsProcessing(true);
         const assignment = selectedComponents.length > 0 ? selectedComponents : [MisleadingComponent.INAPPROPRIATE_SCALE_RANGE];
         await addDetectiveToGroup(game.id, group.id, detectiveEmail, assignment, game);
@@ -208,14 +218,26 @@ const GroupCard: React.FC<GroupCardProps> = ({
 
             <div className="p-4 flex-1 flex flex-col">
                 {/* Detectives List */}
-                <div className="space-y-2 mb-4">
+                <div className="space-y-3 mb-4">
                     {(group.detectives || []).length === 0 && <div className="text-sm text-slate-400 italic">No detectives added.</div>}
                     {(group.detectives || []).map(d => (
-                        <div key={d.email} className="flex justify-between items-center text-sm bg-slate-50 p-2 rounded border">
-                            <span className="font-medium truncate max-w-[120px]" title={d.email}>{d.email}</span>
-                            <div className="flex gap-1">
+                        <div key={d.email} className="bg-slate-50 p-3 rounded border flex flex-col gap-2">
+                            <div className="flex justify-between items-center">
+                                <span className="font-bold text-sm text-slate-800">{d.email}</span>
+                            </div>
+                            {/* Assigned Components List (Text Tags) */}
+                            <div className="flex flex-wrap gap-1.5">
                                 {d.assignedComponents?.map(c => (
-                                    <div key={c} className={`w-2 h-2 rounded-full ${d.trainingProgress?.[c] ? 'bg-green-500' : 'bg-slate-300'}`} title={c} />
+                                    <span 
+                                        key={c} 
+                                        className={`text-[10px] px-2 py-1 rounded border flex items-center gap-1
+                                            ${d.trainingProgress?.[c] 
+                                                ? 'bg-green-100 text-green-800 border-green-200 font-bold' 
+                                                : 'bg-white text-slate-600 border-slate-200'}`}
+                                    >
+                                        {c}
+                                        {d.trainingProgress?.[c] && <CheckCircle size={10} />}
+                                    </span>
                                 ))}
                             </div>
                         </div>
@@ -229,19 +251,23 @@ const GroupCard: React.FC<GroupCardProps> = ({
                             value={detectiveEmail}
                             onChange={e => setDetectiveEmail(e.target.value)}
                             placeholder="Detective Email"
-                            className="w-full text-sm border p-2 rounded mb-2"
+                            className="w-full text-sm border p-2 rounded mb-2 focus:ring-2 focus:ring-blue-500 outline-none"
                         />
                         <div className="mb-2">
                             <label className="text-xs font-bold text-slate-500 mb-1 block">Assign Specialist Training:</label>
-                            <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto">
+                            {/* Enlarged Selection Area */}
+                            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto border p-1 rounded bg-slate-50">
                                 {Object.values(MisleadingComponent).map(c => (
                                     <button 
                                         key={c}
                                         onClick={() => toggleComponent(c)}
-                                        className={`text-[10px] px-2 py-1.5 rounded border text-left truncate transition-colors ${selectedComponents.includes(c) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-                                        title={c}
+                                        className={`text-xs px-3 py-2 rounded border text-left transition-colors flex items-center justify-between
+                                            ${selectedComponents.includes(c) 
+                                                ? 'bg-blue-600 text-white border-blue-600' 
+                                                : 'bg-white text-slate-700 hover:bg-slate-100 border-slate-200'}`}
                                     >
                                         {c}
+                                        {selectedComponents.includes(c) && <Check size={14} />}
                                     </button>
                                 ))}
                             </div>
@@ -249,7 +275,7 @@ const GroupCard: React.FC<GroupCardProps> = ({
                         <button 
                             onClick={handleAddDetective} 
                             disabled={isProcessing}
-                            className="w-full bg-slate-800 text-white text-xs py-2 rounded hover:bg-slate-700 disabled:opacity-50 mt-2"
+                            className="w-full bg-slate-800 text-white text-xs py-2 rounded hover:bg-slate-700 disabled:opacity-50 mt-2 font-bold"
                         >
                             + Add Detective
                         </button>
@@ -702,7 +728,8 @@ const GameRoom = ({
 
     const handleGenerateReport = async () => {
         setIsGenerating(true);
-        const text = await generateInspectionReport(group.annotations || []);
+        // UPDATED: Pass the chartType (e.g., CASE_MARKETING) to generate context-aware conclusion
+        const text = await generateInspectionReport(group.annotations || [], currentCase.chartType);
         await updateGroupReport(game.id, group.id, text, game);
         setIsGenerating(false);
     };
@@ -909,6 +936,23 @@ const GameRoom = ({
                 {/* Left: Graph */}
                 <div className="flex-1 p-6 overflow-y-auto bg-slate-50 relative">
                     
+                    {/* FACILITATOR EYES ONLY: Active Misleading Components */}
+                    {isFacilitator && (
+                        <div className="mb-4 bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded-r-lg shadow-sm animate-fade-in">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Eye size={16} className="text-indigo-600" />
+                                <h3 className="font-bold text-indigo-900 text-xs uppercase tracking-wider">FACILITATOR INTEL: Active Deceptions</h3>
+                            </div>
+                            <div className="flex gap-2 flex-wrap">
+                                {currentActiveIssues.length > 0 ? currentActiveIssues.map(issue => (
+                                    <span key={issue} className="px-2 py-1 bg-white border border-indigo-200 rounded text-xs font-mono text-indigo-700 shadow-sm">
+                                        {issue}
+                                    </span>
+                                )) : <span className="text-xs text-indigo-400 italic">No active deceptions generated for this round.</span>}
+                            </div>
+                        </div>
+                    )}
+
                     {/* PERSUASIVE REPORT CONTEXT (NEW) */}
                     <div className="max-w-4xl mx-auto mb-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-r-lg shadow-sm">
                         <div className="flex items-start gap-3">
@@ -1160,103 +1204,136 @@ const GameRoom = ({
     );
 };
 
-// --- MAIN APP (Unchanged Logic) ---
-
+// 7. Main App Component
 const App = () => {
-  const [view, setView] = useState<View>('LANDING');
-  const [email, setEmail] = useState('');
-  const [gameId, setGameId] = useState<string | null>(null);
-  const [game, setGame] = useState<GameState | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [forcedRole, setForcedRole] = useState<Role | undefined>(undefined);
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+    const [user, setUser] = useState<{email: string, role: Role} | null>(null);
+    const [game, setGame] = useState<GameState | null>(null);
+    const [view, setView] = useState<View>('LANDING');
+    const [loading, setLoading] = useState(false);
+    const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+    const [unsubscribe, setUnsubscribe] = useState<(() => void) | null>(null);
 
-  useEffect(() => {
-    const restoreSession = async () => {
-        const path = window.location.pathname;
-        if (path.includes('/detectives')) {
-            setForcedRole(Role.DETECTIVE);
-        }
+    // NEW: Check for invite link
+    const isInvite = typeof window !== 'undefined' && window.location.pathname.includes('/detectives');
 
-        const savedEmail = localStorage.getItem('chart_detectives_email');
-        if (savedEmail) {
-            setLoading(true);
-            const foundId = await findActiveGame(savedEmail);
-            if (foundId) {
-                setEmail(savedEmail);
-                setGameId(foundId);
-                setView('DASHBOARD');
-            } else {
-                localStorage.removeItem('chart_detectives_email');
+    // Cleanup subscription on unmount
+    useEffect(() => {
+        return () => {
+            if (unsubscribe) {
+                unsubscribe();
             }
-            setLoading(false);
-        }
-    };
-    restoreSession();
-  }, []);
+        };
+    }, [unsubscribe]);
 
-  useEffect(() => {
-    if (!gameId) return;
-    const unsubscribe = subscribeToGame(gameId, (updatedGame) => {
-        if (updatedGame) {
-            setGame(updatedGame);
-        } else {
-            setGame(null);
-            setView('LANDING');
-            setGameId(null);
-        }
-    });
-    return () => unsubscribe();
-  }, [gameId]);
+    const handleLogin = async (email: string, isFacilitator: boolean) => {
+        setLoading(true);
+        try {
+            // 1. Find or Create Game
+            let gameId = await findActiveGame(email);
+            
+            if (!gameId) {
+                if (isFacilitator) {
+                    gameId = await createGame(email);
+                } else {
+                    alert("No active mission found. Please ask a Facilitator to invite you.");
+                    setLoading(false);
+                    return;
+                }
+            }
 
-  const handleLogin = async (userEmail: string, isFacilitator: boolean) => {
-    setLoading(true);
-    let id = await findActiveGame(userEmail);
-    
-    if (!id && isFacilitator) {
-        id = await createGame(userEmail);
-    } else if (!id && !isFacilitator) {
-        alert("No active game found. Ask your Facilitator to add you!");
+            // 2. Subscribe to Game Updates
+            const unsub = subscribeToGame(gameId, (updatedGame) => {
+                if (updatedGame) {
+                    setGame(updatedGame);
+                } else {
+                    // Game was deleted
+                    setGame(null);
+                    setView('LANDING');
+                    setUser(null);
+                    alert("Mission aborted (Session ended).");
+                }
+            });
+            setUnsubscribe(() => unsub);
+
+            // 3. Set State
+            setUser({ email, role: isFacilitator ? Role.FACILITATOR : Role.DETECTIVE });
+            setView('DASHBOARD');
+
+        } catch (error) {
+            console.error("Login Error:", error);
+            alert("Connection failed. Please try again.");
+        }
         setLoading(false);
-        return;
+    };
+
+    const handleLogout = () => {
+        if (unsubscribe) {
+            unsubscribe();
+            setUnsubscribe(null);
+        }
+        setUser(null);
+        setGame(null);
+        setView('LANDING');
+        setActiveGroupId(null);
+    };
+
+    // --- RENDER ROUTER ---
+
+    if (!user) {
+        return <Landing 
+            onLogin={handleLogin} 
+            loading={loading} 
+            forcedRole={isInvite ? Role.DETECTIVE : undefined}
+        />;
     }
 
-    if (id) {
-        localStorage.setItem('chart_detectives_email', userEmail);
-        setEmail(userEmail);
-        setGameId(id);
-        setView('DASHBOARD');
+    if (!game) {
+        return (
+            <div className="h-screen w-full flex items-center justify-center bg-slate-100">
+                <div className="text-center">
+                    <Loader2 className="animate-spin text-indigo-600 mb-4 mx-auto" size={48} />
+                    <p className="text-slate-500 font-bold">Establishing Secure Connection...</p>
+                </div>
+            </div>
+        );
     }
-    setLoading(false);
-  };
 
-  const handleLogout = () => {
-    localStorage.removeItem('chart_detectives_email');
-    setEmail('');
-    setGame(null);
-    setGameId(null);
-    setActiveGroupId(null);
-    setView('LANDING');
-  };
+    if (view === 'ROOM' && activeGroupId) {
+        return (
+            <GameRoom 
+                game={game} 
+                groupId={activeGroupId} 
+                email={user.email} 
+                onLeave={() => setView('DASHBOARD')} 
+            />
+        );
+    }
 
-  const handleEnterRoom = (groupId: string) => {
-      setActiveGroupId(groupId);
-      setView('ROOM');
-  };
+    if (user.role === Role.FACILITATOR) {
+        return (
+            <FacilitatorDashboard 
+                game={game} 
+                email={user.email} 
+                onEnterRoom={(id) => {
+                    setActiveGroupId(id);
+                    setView('ROOM');
+                }}
+                onLogout={handleLogout}
+            />
+        );
+    }
 
-  if (view === 'LANDING' || !game) {
-    return <Landing onLogin={handleLogin} loading={loading} forcedRole={forcedRole} />;
-  }
-
-  const isFacilitator = game.facilitatorEmail === email;
-
-  if (view === 'ROOM' && activeGroupId) {
-    return <GameRoom game={game} groupId={activeGroupId} email={email} onLeave={() => setView('DASHBOARD')} />;
-  }
-
-  return isFacilitator 
-    ? <FacilitatorDashboard game={game} email={email} onEnterRoom={handleEnterRoom} onLogout={handleLogout} />
-    : <DetectiveDashboard game={game} email={email} onEnterRoom={handleEnterRoom} onLogout={handleLogout} />;
+    return (
+        <DetectiveDashboard 
+            game={game} 
+            email={user.email} 
+            onEnterRoom={(id) => {
+                setActiveGroupId(id);
+                setView('ROOM');
+            }}
+            onLogout={handleLogout}
+        />
+    );
 };
 
 export default App;

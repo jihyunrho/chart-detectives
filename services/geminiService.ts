@@ -2,25 +2,40 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Annotation, MisleadingComponent } from "../types";
 
 // Helper to safely get the AI client
-const ai = new GoogleGenAI({ apiKey: process.env.VITE_GEMINI_API_KEY });
+// We initialize lazily to prevent the app from crashing on load if the key is missing.
+const getAIClient = () => {
+    const apiKey = process.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+        console.warn("API_KEY is missing in process.env. AI features will not work.");
+        throw new Error("API Key is missing");
+    }
+    return new GoogleGenAI({ apiKey });
+};
 
-export const generateInspectionReport = async (annotations: Annotation[]): Promise<string> => {
+export const generateInspectionReport = async (annotations: Annotation[], caseType: string): Promise<string> => {
+    // UPDATED: Removed coordinates (x, y) from the notes string
     const notes = annotations.map(a => 
-        `- Location: (${a.x.toFixed(1)}%, ${a.y.toFixed(1)}%) | Detective: ${a.authorEmail} | Issue: ${a.reason} | Impact: ${a.impact}`
+        `- Issue found: ${a.reason} -> Misunderstanding caused: ${a.impact}`
     ).join('\n');
 
+    const context = caseType.includes('MARKETING') ? 'Marketing' : 'Policy';
+
     const prompt = `
-    You are a Senior Data Analyst. 
-    A team of detectives has inspected a suspicious marketing chart and left the following notes:
+    You are an automated report generator for a detective agency.
     
+    Data Source (Detective Notes):
     ${notes}
 
-    Based on these notes, generate a concise but professional "Inspection Report" (approx 100-150 words).
-    Highlight the key misleading features identified by the team and their potential business impact.
-    Do not use markdown formatting like bold or headers, just plain text paragraphs.
+    Case Type: ${context}
+
+    Instructions:
+    1. Introduction: Strictly start with exactly this sentence: "The detectives have executed an inspection on this case, and the results are as follows."
+    2. Body: Summarize the notes into a concise paragraph describing the misleading components found and their specific impact on interpretation. Keep it brief.
+    3. Conclusion: Strictly end with exactly this sentence structure: "Therefore, this ${context} report, which is based on a graph containing misleading elements, is a misled report."
     `;
 
     try {
+        const ai = getAIClient();
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
@@ -54,6 +69,7 @@ export const evaluateInspection = async (
     `;
 
     try {
+        const ai = getAIClient();
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
@@ -122,6 +138,7 @@ export const getTrainingFeedback = async (
     }
 
     try {
+        const ai = getAIClient();
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,

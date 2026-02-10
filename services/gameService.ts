@@ -21,7 +21,8 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // --- HELPER: Random Issue Generator ---
-const generateCaseIssues = (detectives: User[]): MisleadingComponent[] => {
+// MODIFIED FOR TESTING: Accepts caseIndex to force specific issues
+const generateCaseIssues = (detectives: User[], caseIndex: number = 0): MisleadingComponent[] => {
     // 1. Get all components assigned to detectives (The Training Set)
     const assignedSet = new Set<MisleadingComponent>();
     detectives.forEach(d => {
@@ -29,27 +30,30 @@ const generateCaseIssues = (detectives: User[]): MisleadingComponent[] => {
     });
 
     // 2. Get the pool of components NOT assigned
-    const allComponents = Object.values(MisleadingComponent);
-    const unassigned = allComponents.filter(c => !assignedSet.has(c));
+    // const allComponents = Object.values(MisleadingComponent);
+    // const unassigned = allComponents.filter(c => !assignedSet.has(c));
 
-    // 3. Pick 2 random components from the unassigned pool
+    // 3. TESTING LOGIC: Force specific components per case
+    const extraPicks: MisleadingComponent[] = [];
+
+    if (caseIndex === 0) {
+        // Case 1: Add Misleading Annotations
+        extraPicks.push(MisleadingComponent.MISLEADING_ANNOTATION);
+    } else if (caseIndex === 1) {
+        // Case 2: Add Inappropriate Order
+        extraPicks.push(MisleadingComponent.INAPPROPRIATE_ORDER);
+    }
+
+    /* ORIGINAL LOGIC COMMENTED OUT
     const randomPicks: MisleadingComponent[] = [];
-    const pool = [...unassigned];
-    
-    // Pick first random
-    if (pool.length > 0) {
-        const idx1 = Math.floor(Math.random() * pool.length);
-        randomPicks.push(pool[idx1]);
-        pool.splice(idx1, 1);
+    if (unassigned.length > 0) {
+        const idx = Math.floor(Math.random() * unassigned.length);
+        randomPicks.push(unassigned[idx]);
     }
-    // Pick second random
-    if (pool.length > 0) {
-        const idx2 = Math.floor(Math.random() * pool.length);
-        randomPicks.push(pool[idx2]);
-    }
+    */
 
-    // 4. Combine Assigned + Randoms
-    const finalIssues = Array.from(new Set([...Array.from(assignedSet), ...randomPicks]));
+    // 4. Combine Assigned + Extras
+    const finalIssues = Array.from(new Set([...Array.from(assignedSet), ...extraPicks]));
     return finalIssues;
 };
 
@@ -172,9 +176,9 @@ export const updateGroupStatus = async (gameId: string, groupId: string, status:
     const updatedGroups = currentGame.groups.map(g => {
         if (g.id === groupId) {
              const updates: Partial<Group> = { status };
-             // If activating (Moving to Case 1), generate the issues for the first case
+             // If activating (Moving to Case 1), generate the issues for the first case (Index 0)
              if (status === GameStatus.ACTIVE && g.status === GameStatus.SETUP) {
-                 updates.currentCaseTargetIssues = generateCaseIssues(g.detectives);
+                 updates.currentCaseTargetIssues = generateCaseIssues(g.detectives, 0);
              }
              return { ...g, ...updates };
         }
@@ -300,13 +304,14 @@ export const advanceToNextRound = async (
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { evaluationResult, ...rest } = g;
             
-            // Generate NEW mixed issues for the next round to keep it challenging
-            const nextIssues = generateCaseIssues(g.detectives);
+            const nextIndex = g.currentCaseIndex + 1;
+            // Generate NEW mixed issues for the next round
+            const nextIssues = generateCaseIssues(g.detectives, nextIndex);
 
             return {
                 ...rest,
                 status: GameStatus.ACTIVE, // Resume action
-                currentCaseIndex: g.currentCaseIndex + 1,
+                currentCaseIndex: nextIndex,
                 currentCaseTargetIssues: nextIssues,
                 roundHistory: [...(g.roundHistory || []), historyEntry],
                 // Reset session data for new round
