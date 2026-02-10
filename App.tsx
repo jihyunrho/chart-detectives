@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   createGame, findActiveGame, subscribeToGame, 
   createGroup, addDetectiveToGroup, updateDetectiveTraining, addAnnotationToGroup,
   updateGroupStatus, updateGroupReport, resetGroupData, resetGameData, advanceToNextRound
 } from './services/gameService';
 import { generateInspectionReport, evaluateInspection, getTrainingFeedback } from './services/geminiService';
-import { Role, MisleadingComponent, GameStatus, GameState, User, Group, CaseScenario, RoundHistory } from './types';
+import { Role, MisleadingComponent, GameStatus, GameState, Group, CaseScenario, RoundHistory } from './types';
 import { MisleadingChart } from './components/MisleadingCharts';
 import { 
   User as UserIcon, Users, CheckCircle, Lock, Play, 
